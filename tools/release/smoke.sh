@@ -2,12 +2,18 @@
 set -euo pipefail
 image=${1:?usage: bash tools/release/smoke.sh image}
 name="cloudreve-smoke-$RANDOM-$$"
-scratch=$(mktemp -d)
+scratch=$(mktemp -d /tmp/cloudreve-image-smoke.XXXXXX)
 cleanup() {
   result=$?
   if ((result != 0)); then docker logs --tail 80 "$name" >&2 || true; fi
   docker rm -f "$name" >/dev/null 2>&1 || true
-  rm -rf -- "$scratch"
+  # The container creates root-owned private directories in this CI-only mount.
+  if [[ $(realpath -m -- "$scratch") != /tmp/cloudreve-image-smoke.* ]]; then
+    echo 'Refusing to clean an unexpected smoke directory' >&2
+    result=1
+  elif ! sudo rm -rf -- "$scratch"; then
+    result=1
+  fi
   return "$result"
 }
 trap cleanup EXIT

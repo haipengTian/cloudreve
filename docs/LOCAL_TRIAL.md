@@ -17,7 +17,7 @@
 - 启动脚本将监听地址限制为 `127.0.0.1:5212`，不向局域网开放，也不注册开机启动。
 - 本机 Docker 引擎未运行，因此本次采用官方原生程序。
 - 用户已手动启动并注册管理员；已在浏览器完成下述基础流程验证。
-- 当前仍是本地存储试用，**没有接入 ImageBed**。
+- 原官方程序用于本地存储基线验证；当前 ImageBed 候选通过 `start.ps1 -ImageBed` 启动，见下方接入说明。
 
 程序、运行数据和样例位于 Git 忽略目录 `.local/`，请勿将其中的数据库、配置或个人文件提交到仓库。
 如需备份，先正常停止程序，再完整复制 `.local/runtime/`，不要只复制数据库。
@@ -70,7 +70,7 @@ Markdown 编辑器仅打开查看、关闭时也出现了未保存更改确认�
 
 ## ImageBed 候选接入
 
-社区版基础流程通过后，已实现候选存储适配和配置入口。保留 Cloudreve 原界面，第一版不增加 AI 功能。构建、切换及联调说明见 [IMAGEBED_INTEGRATION.md](IMAGEBED_INTEGRATION.md)。运行中的官方试用仍未接入图床。
+社区版基础流程通过后，已实现候选存储适配和配置入口。保留 Cloudreve 原界面，第一版不增加 AI 功能。构建、切换及联调说明见 [IMAGEBED_INTEGRATION.md](IMAGEBED_INTEGRATION.md)；镜像发布见 [IMAGEBED_RELEASE.md](IMAGEBED_RELEASE.md)。
 
 Cloudreve 的 WebDAV 是对外文件访问服务，不是外部存储驱动，不能直接将 ImageBed 的 `/dav/` 地址当作现成的存储策略配置。
 
@@ -83,7 +83,7 @@ Cloudreve 的 WebDAV 是对外文件访问服务，不是外部存储驱动，�
 
 ImageBed 接入需要保持私密读取鉴权、文件标识映射、上传失败清理和删除语义一致。共用底层 S3 Bucket 不等于经过 ImageBed，也不代表两套文件元数据能自动同步。
 
-用户已授权后续仅在 `https://img.thpvip.xyz` 的 `cloudreve-test/` 目录联调，并同意准备支持私密上传的升级材料；服务器升级仍由用户执行。凭据由用户在本机配置，不写入代码或聊天。当前没有向该实例上传、删除文件或修改设置。
+用户已授权仅在 `https://img.thpvip.xyz` 的 `cloudreve-test/` 目录联调；已真实上传八类样例，当前进度见集成说明。服务器部署仍由用户执行。凭据由用户配置，不写入代码或聊天。
 
 参考：
 
