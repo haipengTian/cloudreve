@@ -1,0 +1,77 @@
+name: ImageBed custom image
+on:
+  push:
+    branches: ['codex/imagebed-integration']
+    tags: ['4.19.1-custom.*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: imagebed-image-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  image:
+    if: github.repository == 'haipengTian/cloudreve'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - name: Validate version
+        id: release
+        env:
+          REF: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          version=4.19.1-custom.1
+          if [[ $REF_TYPE == tag ]]; then
+            [[ $REF =~ ^4\.19\.1-custom\.[1-9][0-9]*$ ]]
+            version=$REF
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          bash -n tools/release/smoke.sh
+          sh -n tools/release/entrypoint.sh
+          node --check tools/release/smoke.mjs
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - name: Build amd64 candidate with focused tests
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.imagebed
+          platforms: linux/amd64
+          load: true
+          tags: cloudreve-imagebed:smoke
+          build-args: |
+            RELEASE_VERSION=${{ steps.release.outputs.version }}
+            SOURCE_COMMIT=${{ github.sha }}
+          cache-from: type=gha,scope=cloudreve-imagebed
+          cache-to: type=gha,scope=cloudreve-imagebed,mode=max
+      - name: Container health and persistence smoke
+        run: bash tools/release/smoke.sh cloudreve-imagebed:smoke
+      - uses: docker/login-action@v4
+        if: github.ref_type == 'tag'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish tested version (amd64 and arm64)
+        if: github.ref_type == 'tag'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.imagebed
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/haipengtian/cloudreve:${{ steps.release.outputs.version }}
+          build-args: |
+            RELEASE_VERSION=${{ steps.release.outputs.version }}
+            SOURCE_COMMIT=${{ github.sha }}
+          cache-from: type=gha,scope=cloudreve-imagebed
+      - name: Release summary
+        if: github.ref_type == 'tag'
+        run: echo 'Published ghcr.io/haipengtian/cloudreve:${{ steps.release.outputs.version }} (amd64 smoke passed, arm64 built).' >> "$GITHUB_STEP_SUMMARY"

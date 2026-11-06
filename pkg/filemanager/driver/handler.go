@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"encoding/gob"
+	"net/http"
 	"os"
 	"time"
 
@@ -24,6 +25,13 @@ const (
 )
 
 type (
+	// ContentSource optionally supplies server-authenticated remote content.
+	// Drivers implementing it must require the internal proxy. Credentials stay
+	// inside the driver rather than being embedded in browser-visible URLs.
+	ContentSource interface {
+		Content(ctx context.Context, e fs.Entity, method string, headers http.Header) (*http.Response, error)
+	}
+
 	MetaType  string
 	MediaMeta struct {
 		Key   string   `json:"key"`

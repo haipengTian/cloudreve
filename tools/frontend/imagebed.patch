@@ -1,0 +1,203 @@
+diff --git a/src/api/dashboard.ts b/src/api/dashboard.ts
+index e90303e..46f2621 100644
+--- a/src/api/dashboard.ts
++++ b/src/api/dashboard.ts
+@@ -212,6 +212,7 @@ export enum NodeStatus {
+ }
+ 
+ export interface PolicySetting {
++  imagebed_channel_name?: string;
+   token?: string;
+   file_type?: string[];
+   is_file_type_deny_list?: boolean;
+diff --git a/src/api/explorer.ts b/src/api/explorer.ts
+index af6093e..019bb0e 100644
+--- a/src/api/explorer.ts
++++ b/src/api/explorer.ts
+@@ -93,6 +93,7 @@ export interface Share {
+ }
+ 
+ export enum PolicyType {
++  imagebed = "imagebed",
+   local = "local",
+   remote = "remote",
+   oss = "oss",
+diff --git a/src/component/Admin/StoragePolicy/EditStoragePolicy/StoragePolicyForm.tsx b/src/component/Admin/StoragePolicy/EditStoragePolicy/StoragePolicyForm.tsx
+index b703b9a..45fe0f5 100644
+--- a/src/component/Admin/StoragePolicy/EditStoragePolicy/StoragePolicyForm.tsx
++++ b/src/component/Admin/StoragePolicy/EditStoragePolicy/StoragePolicyForm.tsx
+@@ -11,10 +11,12 @@ import {
+   ThumbnailsSection,
+ } from "./FormSections";
+ import { StoragePolicySettingContext } from "./StoragePolicySettingWrapper";
++import { PolicyType } from "../../../../api/explorer";
++import ImageBedPolicyFields from "../ImageBed/ImageBedPolicyFields";
+ 
+ const StoragePolicyForm = () => {
+   const { t } = useTranslation("dashboard");
+-  const { formRef, values } = useContext(StoragePolicySettingContext);
++  const { formRef, values, setPolicy } = useContext(StoragePolicySettingContext);
+ 
+   return (
+     <Box component={"form"} ref={formRef} onSubmit={(e) => e.preventDefault()}>
+@@ -28,12 +30,16 @@ const StoragePolicyForm = () => {
+         </Alert>
+       )}
+       <Stack spacing={5}>
++        {values.type === PolicyType.imagebed ? (
++          <ImageBedPolicyFields policy={values} onChange={(policy) => setPolicy(() => policy)} />
++        ) : <>
+         <BasicInfoSection />
+         <StorageAndUploadSection />
+         <DownloadSection />
+         <ThumbnailsSection />
+         <MediaMetadataSection />
+         <EncryptionSection />
++        </>}
+       </Stack>
+     </Box>
+   );
+diff --git a/src/component/Admin/StoragePolicy/ImageBed/ImageBedPolicyFields.tsx b/src/component/Admin/StoragePolicy/ImageBed/ImageBedPolicyFields.tsx
+new file mode 100644
+index 0000000..13ef0f3
+--- /dev/null
++++ b/src/component/Admin/StoragePolicy/ImageBed/ImageBedPolicyFields.tsx
+@@ -0,0 +1,37 @@
++import { Alert, Stack } from "@mui/material";
++import type { StoragePolicy } from "../../../../api/dashboard";
++import { DenseFilledTextField } from "../../../Common/StyledComponents";
++import SettingForm from "../../../Pages/Setting/SettingForm";
++import { NoMarginHelperText } from "../../Settings/Settings";
++import { configureImageBedPolicy } from "./policy";
++
++export default function ImageBedPolicyFields({ policy, onChange }: {
++  policy: StoragePolicy;
++  onChange: (policy: StoragePolicy) => void;
++}) {
++  const update = (patch: Partial<StoragePolicy>) => onChange(configureImageBedPolicy({ ...policy, ...patch }));
++  return (
++    <Stack spacing={3}>
++      <Alert severity="info">文件通过 ImageBed 存取，实际渠道沿用 ImageBed 的默认上传设置，无需在此重复配置。上传和读取均经 Cloudreve 服务端，私密文件不会开放图床直链。</Alert>
++      <SettingForm title="存储策略名称" lgWidth={8}>
++        <DenseFilledTextField fullWidth required value={policy.name} onChange={(e) => update({ name: e.target.value })} />
++      </SettingForm>
++      <SettingForm title="ImageBed 地址" lgWidth={8}>
++        <DenseFilledTextField fullWidth required type="url" value={policy.server ?? ""} inputProps={{ pattern: "https://[^/]+/?" }} onChange={(e) => update({ server: e.target.value })} />
++        <NoMarginHelperText>填写 HTTPS 域名，不包含 /upload 或 /file 路径。</NoMarginHelperText>
++      </SettingForm>
++      <SettingForm title="专用存储目录" lgWidth={8}>
++        <DenseFilledTextField fullWidth required disabled={policy.id !== 0} value={policy.bucket_name ?? ""} inputProps={{ pattern: "[A-Za-z0-9_-]+" }} onChange={(e) => update({ bucket_name: e.target.value })} />
++        <NoMarginHelperText>文件使用独立物理标识，Cloudreve 中的中文文件名、改名和移动不受影响。创建后不要改变此目录或由其他应用写入。</NoMarginHelperText>
++      </SettingForm>
++      <SettingForm title="API Token" lgWidth={8}>
++        <DenseFilledTextField fullWidth required type="password" autoComplete="new-password" value={policy.secret_key ?? ""} onChange={(e) => update({ secret_key: e.target.value })} />
++        <NoMarginHelperText>在本机填写，需要 upload、manage、delete 权限。不要发送到聊天或提交到代码仓库。</NoMarginHelperText>
++      </SettingForm>
++      <SettingForm title="单文件大小上限（MiB）" lgWidth={8}>
++        <DenseFilledTextField required type="number" inputProps={{ min: 1, max: 100, step: 1 }} value={(policy.max_size ?? 104857600) / 1048576} onChange={(e) => update({ max_size: Number(e.target.value) * 1048576 })} />
++        <NoMarginHelperText>当前使用单请求中转并临时落盘；首版默认 100 MiB，暂不支持分片直传和已有图床文件导入。</NoMarginHelperText>
++      </SettingForm>
++    </Stack>
++  );
++}
+diff --git a/src/component/Admin/StoragePolicy/ImageBed/ImageBedWizard.tsx b/src/component/Admin/StoragePolicy/ImageBed/ImageBedWizard.tsx
+new file mode 100644
+index 0000000..8a169eb
+--- /dev/null
++++ b/src/component/Admin/StoragePolicy/ImageBed/ImageBedWizard.tsx
+@@ -0,0 +1,17 @@
++import { Button, Stack } from "@mui/material";
++import { useRef, useState } from "react";
++import type { AddWizardProps } from "../AddWizardDialog";
++import ImageBedPolicyFields from "./ImageBedPolicyFields";
++import { createImageBedPolicy } from "./policy";
++
++export default function ImageBedWizard({ onSubmit }: AddWizardProps) {
++  const [policy, setPolicy] = useState(createImageBedPolicy);
++  const form = useRef<HTMLFormElement>(null);
++  const submit = () => { if (form.current?.reportValidity()) onSubmit(policy); };
++  return (
++    <Stack component="form" ref={form} spacing={3} onSubmit={(e) => { e.preventDefault(); submit(); }}>
++      <ImageBedPolicyFields policy={policy} onChange={setPolicy} />
++      <Button type="submit" variant="contained" sx={{ alignSelf: "flex-start" }}>创建 ImageBed 存储策略</Button>
++    </Stack>
++  );
++}
+diff --git a/src/component/Admin/StoragePolicy/ImageBed/policy.ts b/src/component/Admin/StoragePolicy/ImageBed/policy.ts
+new file mode 100644
+index 0000000..f334c11
+--- /dev/null
++++ b/src/component/Admin/StoragePolicy/ImageBed/policy.ts
+@@ -0,0 +1,35 @@
++import type { StoragePolicy } from "../../../../api/dashboard.ts";
++import type { PolicyType } from "../../../../api/explorer.ts";
++
++export function configureImageBedPolicy(policy: StoragePolicy): StoragePolicy {
++  return {
++    ...policy,
++    is_private: true,
++    dir_name_rule: `${policy.bucket_name}/{uid}`,
++    file_name_rule: "{uuid}{ext}",
++    settings: {
++      ...policy.settings,
++      relay: true,
++      internal_proxy: true,
++      custom_proxy: false,
++      chunk_size: 0,
++      encryption: false,
++      thumb_generator_proxy: true,
++      media_meta_generator_proxy: true,
++    },
++  };
++}
++
++export function createImageBedPolicy(): StoragePolicy {
++  return configureImageBedPolicy({
++    id: 0,
++    name: "ImageBed（测试）",
++    type: "imagebed" as PolicyType,
++    server: "https://img.thpvip.xyz",
++    bucket_name: "cloudreve-test",
++    secret_key: "",
++    max_size: 100 << 20,
++    settings: {},
++    edges: {},
++  });
++}
+diff --git a/src/component/Admin/StoragePolicy/StoragePolicySetting.tsx b/src/component/Admin/StoragePolicy/StoragePolicySetting.tsx
+index 653455a..1f71e5d 100644
+--- a/src/component/Admin/StoragePolicy/StoragePolicySetting.tsx
++++ b/src/component/Admin/StoragePolicy/StoragePolicySetting.tsx
+@@ -30,6 +30,7 @@ import RemoteWizard from "./Wizards/Remote/RemoteWizard";
+ import S3Wizard from "./Wizards/S3/S3Wizard";
+ import KS3Wizard from "./Wizards/KS3/KS3Wizard";
+ import UpyunWizard from "./Wizards/Upyun/UpyunWizard";
++import ImageBedWizard from "./ImageBed/ImageBedWizard";
+ 
+ export const PageQuery = "page";
+ export const PageSizeQuery = "page_size";
+@@ -67,6 +68,12 @@ export interface PolicyProps {
+ }
+ 
+ export const PolicyPropsMap: Record<PolicyType, PolicyProps> = {
++  [PolicyType.imagebed]: {
++    name: "ImageBed",
++    img: "/static/img/remote.png",
++    wizardSize: "md",
++    wizard: ImageBedWizard,
++  },
+   [PolicyType.local]: {
+     name: "policy.local",
+     img: "/static/img/local.png",
+diff --git a/src/component/Uploader/core/uploader/base.ts b/src/component/Uploader/core/uploader/base.ts
+index 61a3d5d..b7c7182 100644
+--- a/src/component/Uploader/core/uploader/base.ts
++++ b/src/component/Uploader/core/uploader/base.ts
+@@ -56,6 +56,7 @@ export interface RetryOption {
+ }
+ 
+ const resumePolicy = [
++  PolicyType.imagebed,
+   PolicyType.local,
+   PolicyType.remote,
+   PolicyType.qiniu,

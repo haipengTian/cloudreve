@@ -260,6 +260,9 @@ type (
 func (service *CreateStoragePolicyService) Create(c *gin.Context) (*GetStoragePolicyResponse, error) {
 	dep := dependency.FromContext(c)
 	storagePolicyClient := dep.StoragePolicyClient()
+	if err := prepareImageBedPolicy(service.Policy); err != nil {
+		return nil, serializer.NewError(serializer.CodeParamErr, "Invalid ImageBed policy", err)
+	}
 
 	if service.Policy.Type == types.PolicyTypeLocal {
 		service.Policy.DirNameRule = util.DataPath("uploads/{uid}/{path}")
@@ -295,6 +298,18 @@ func (service *UpdateStoragePolicyService) Update(c *gin.Context) (*GetStoragePo
 	}
 
 	service.Policy.ID = idInt
+	if err := prepareImageBedPolicy(service.Policy); err != nil {
+		return nil, serializer.NewError(serializer.CodeParamErr, "Invalid ImageBed policy", err)
+	}
+	previous, err := storagePolicyClient.GetPolicyByID(c, idInt)
+	if err != nil {
+		return nil, serializer.NewError(serializer.CodeDBError, "Failed to get policy", err)
+	}
+	if previous.Type == types.PolicyTypeImageBed || service.Policy.Type == types.PolicyTypeImageBed {
+		if previous.Type != service.Policy.Type || previous.BucketName != service.Policy.BucketName {
+			return nil, serializer.NewError(serializer.CodeParamErr, "ImageBed policy type and root directory are immutable; create a new policy instead", nil)
+		}
+	}
 
 	sc, tx, ctx, err := inventory.WithTx(c, storagePolicyClient)
 	if err != nil {

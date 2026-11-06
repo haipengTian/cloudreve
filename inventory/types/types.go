@@ -40,6 +40,8 @@ type (
 
 	// PolicySetting 非公有的存储策略属性
 	PolicySetting struct {
+		// ImageBedChannelName is retained for old policy JSON; routing now belongs to ImageBed.
+		ImageBedChannelName string `json:"imagebed_channel_name,omitempty"`
 		// Upyun访问Token
 		Token string `json:"token"`
 		// 允许的文件扩展名
@@ -299,16 +301,17 @@ const (
 )
 
 const (
-	PolicyTypeLocal  = "local"
-	PolicyTypeQiniu  = "qiniu"
-	PolicyTypeUpyun  = "upyun"
-	PolicyTypeOss    = "oss"
-	PolicyTypeCos    = "cos"
-	PolicyTypeS3     = "s3"
-	PolicyTypeKs3    = "ks3"
-	PolicyTypeOd     = "onedrive"
-	PolicyTypeRemote = "remote"
-	PolicyTypeObs    = "obs"
+	PolicyTypeLocal    = "local"
+	PolicyTypeImageBed = "imagebed"
+	PolicyTypeQiniu    = "qiniu"
+	PolicyTypeUpyun    = "upyun"
+	PolicyTypeOss      = "oss"
+	PolicyTypeCos      = "cos"
+	PolicyTypeS3       = "s3"
+	PolicyTypeKs3      = "ks3"
+	PolicyTypeOd       = "onedrive"
+	PolicyTypeRemote   = "remote"
+	PolicyTypeObs      = "obs"
 )
 
 const (

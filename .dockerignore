@@ -1,0 +1,14 @@
+.git
+.local
+assets
+.idea
+.vscode
+**/node_modules
+**/.env
+**/.env.*
+**/*.ini
+**/*.db
+**/*.db-*
+**/*.sqlite*
+**/*.exe
+application/statics/assets.zip

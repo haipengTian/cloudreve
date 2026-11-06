@@ -313,28 +313,49 @@ func (f *entitySource) Serve(w http.ResponseWriter, r *http.Request, opts ...Ent
 
 	if !f.IsLocal() {
 		// for non-local file, reverse-proxy the request
-		expire := time.Now().Add(defaultUrlExpire)
-		u, err := f.Url(driver.WithForcePublicEndpoint(f.o.Ctx, false), WithNoInternalProxy(), WithExpire(&expire))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		target, err := url.Parse(u.Url)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+		var target *url.URL
+		var transport http.RoundTripper
+		if source, ok := f.handler.(driver.ContentSource); ok {
+			// Get the upstream response without generating another internal-proxy
+			// URL. This avoids recursive proxying for authenticated remote drivers.
+			transport = contentTransport{source: source, entity: f.e}
+		} else {
+			expire := time.Now().Add(defaultUrlExpire)
+			u, err := f.Url(driver.WithForcePublicEndpoint(f.o.Ctx, false), WithNoInternalProxy(), WithExpire(&expire))
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			target, err = url.Parse(u.Url)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 		}
 
 		start := time.Now()
 		proxy := &httputil.ReverseProxy{
+			Transport: transport,
 			Director: func(request *http.Request) {
-				request.URL.Scheme = target.Scheme
-				request.URL.Host = target.Host
-				request.URL.Path = target.Path
-				request.URL.RawPath = target.RawPath
-				request.URL.RawQuery = target.RawQuery
-				request.Host = target.Host
+				if transport != nil {
+					// Preconditions were already evaluated against Cloudreve's ETag.
+					// Do not compare that ETag to a different backend ETag.
+					for _, header := range []string{"If-Range", "If-Match", "If-None-Match", "If-Modified-Since", "If-Unmodified-Since"} {
+						request.Header.Del(header)
+					}
+					request.Header.Del("Range")
+					if rangeReq != "" {
+						request.Header.Set("Range", rangeReq)
+					}
+				}
+				if target != nil {
+					request.URL.Scheme = target.Scheme
+					request.URL.Host = target.Host
+					request.URL.Path = target.Path
+					request.URL.RawPath = target.RawPath
+					request.URL.RawQuery = target.RawQuery
+					request.Host = target.Host
+				}
 				request.Header.Del("Authorization")
 			},
 			ModifyResponse: func(response *http.Response) error {
@@ -532,6 +553,7 @@ func (f *entitySource) ReadAt(p []byte, off int64) (n int, err error) {
 	if err != nil {
 		return 0, err
 	}
+	defer rsc.Close()
 	return io.ReadFull(rsc, p)
 }
 
@@ -703,6 +725,18 @@ func (f *entitySource) getRsc(pos int64) (io.ReadCloser, error) {
 		} else {
 			rsc = file
 		}
+	} else if source, ok := f.handler.(driver.ContentSource); ok {
+		h := http.Header{"Range": {fmt.Sprintf("bytes=%d-", pos)}}
+		response, err := source.Content(f.o.Ctx, f.e, http.MethodGet, h)
+		if err != nil {
+			return nil, err
+		}
+		if (response.StatusCode != http.StatusOK && response.StatusCode != http.StatusPartialContent) ||
+			(pos > 0 && (response.StatusCode != http.StatusPartialContent || parseContentRangeOffset(response.Header.Get("Content-Range")) != pos)) {
+			response.Body.Close()
+			return nil, fmt.Errorf("remote content returned invalid status or range (HTTP %d)", response.StatusCode)
+		}
+		rsc = response.Body
 	} else {
 		var urlStr string
 		now := time.Now()

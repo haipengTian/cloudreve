@@ -8,6 +8,7 @@ import (
 	"github.com/cloudreve/Cloudreve/v4/pkg/cluster"
 	"github.com/cloudreve/Cloudreve/v4/pkg/filemanager/driver"
 	"github.com/cloudreve/Cloudreve/v4/pkg/filemanager/driver/cos"
+	"github.com/cloudreve/Cloudreve/v4/pkg/filemanager/driver/imagebed"
 	"github.com/cloudreve/Cloudreve/v4/pkg/filemanager/driver/ks3"
 	"github.com/cloudreve/Cloudreve/v4/pkg/filemanager/driver/local"
 	"github.com/cloudreve/Cloudreve/v4/pkg/filemanager/driver/obs"
@@ -64,6 +65,8 @@ func (m *manager) CastStoragePolicyOnSlave(ctx context.Context, policy *ent.Stor
 
 func (m *manager) GetStorageDriver(ctx context.Context, policy *ent.StoragePolicy) (driver.Handler, error) {
 	switch policy.Type {
+	case types.PolicyTypeImageBed:
+		return imagebed.New(policy, m.dep.MimeDetector(ctx))
 	case types.PolicyTypeLocal:
 		return local.New(policy, m.l, m.config), nil
 	case types.PolicyTypeRemote:

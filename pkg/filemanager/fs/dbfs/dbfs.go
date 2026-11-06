@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"time"
 
@@ -785,6 +786,8 @@ func (f *DBFS) navigatorId(path *fs.URI) string {
 	}
 }
 
+var imageBedExtension = regexp.MustCompile(`^\.[a-zA-Z0-9_-]+$`)
+
 // generateSavePath generates the physical save path for the upload request.
 func generateSavePath(policy *ent.StoragePolicy, req *fs.UploadRequest, user *ent.User) string {
 	currentTime := time.Now()
@@ -797,6 +800,16 @@ func generateSavePath(policy *ent.StoragePolicy, req *fs.UploadRequest, user *en
 	dirRule = dynamicReplace(dirRule, true)
 
 	nameRule := policy.FileNameRule
+	if policy.Type == types.PolicyTypeImageBed {
+		// Apply to new paths even when an existing policy still stores {uuid}.
+		// Persisted entity and upload-session paths are never rewritten here.
+		nameRule = "{uuid}"
+		if ext := filepath.Ext(req.Props.Uri.Name()); imageBedExtension.MatchString(ext) {
+			nameRule += ext
+		}
+		// Unusual extensions keep the previous UUID-only physical name so that
+		// arbitrary display names remain uploadable under ImageBed's safe paths.
+	}
 	nameRule = dynamicReplace(nameRule, false)
 
 	return path.Join(path.Clean(dirRule), nameRule)

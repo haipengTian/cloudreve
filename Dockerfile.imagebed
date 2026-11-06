@@ -1,0 +1,50 @@
+# syntax=docker/dockerfile:1
+FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS frontend
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git unzip zip \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /frontend
+ARG FRONTEND_REVISION=19da0fe1ecd40971fafa813983d769fdce41573c
+RUN curl --fail --location --retry 3 "https://codeload.github.com/cloudreve/frontend/zip/${FRONTEND_REVISION}" -o /tmp/frontend.zip \
+    && unzip -q /tmp/frontend.zip -d /tmp \
+    && cp -a "/tmp/frontend-${FRONTEND_REVISION}/." . \
+    && rm /tmp/frontend.zip
+COPY tools/frontend/imagebed.patch /tmp/imagebed.patch
+RUN git apply --check /tmp/imagebed.patch && git apply /tmp/imagebed.patch \
+    && yarn install --frozen-lockfile --ignore-scripts --non-interactive
+COPY tools/frontend/policy.test.mjs /tests/policy.test.mjs
+RUN CLOUDREVE_FRONTEND_SOURCE=/frontend node --test /tests/policy.test.mjs
+ENV NODE_OPTIONS=--max-old-space-size=6144 \
+    npm_package_name=cloudreve-frontend npm_package_version=4.19.1
+RUN node node_modules/vite/bin/vite.js build \
+    && mkdir -p /out/assets && cp -a build /out/assets/build \
+    && cd /out && zip -qr assets.zip assets
+
+FROM --platform=$BUILDPLATFORM golang:1.26.5-bookworm AS backend
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY . .
+COPY --from=frontend /out/assets.zip application/statics/assets.zip
+ARG TARGETOS TARGETARCH
+ARG RELEASE_VERSION=4.19.1-custom.1
+ARG SOURCE_COMMIT=development
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    go test -p 2 ./pkg/filemanager/fs/dbfs ./pkg/filemanager/driver/imagebed ./pkg/filemanager/manager/entitysource ./service/admin \
+    && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -buildvcs=false -trimpath -p 2 \
+       -ldflags="-s -w -X github.com/cloudreve/Cloudreve/v4/application/constants.BackendVersion=4.19.1 -X github.com/cloudreve/Cloudreve/v4/application/constants.LastCommit=${RELEASE_VERSION}-${SOURCE_COMMIT}" \
+       -o /out/cloudreve .
+
+# Preserve the official image's preview tools, fonts and optional aria2 runtime.
+FROM cloudreve/cloudreve:4.19.1
+ARG RELEASE_VERSION=4.19.1-custom.1
+ARG SOURCE_COMMIT=development
+LABEL org.opencontainers.image.source="https://github.com/haipengTian/cloudreve" \
+      org.opencontainers.image.version=$RELEASE_VERSION \
+      org.opencontainers.image.revision=$SOURCE_COMMIT \
+      org.opencontainers.image.licenses="GPL-3.0-only"
+COPY --from=backend --chmod=755 /out/cloudreve /cloudreve/cloudreve
+COPY --chmod=755 tools/release/entrypoint.sh /cloudreve/imagebed-entrypoint.sh
+HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=6 \
+    CMD wget -q -O /dev/null http://127.0.0.1:5212/api/v4/site/ping || exit 1
+ENTRYPOINT ["/cloudreve/imagebed-entrypoint.sh"]
+CMD ["server"]
